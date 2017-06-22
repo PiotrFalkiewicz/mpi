@@ -4,11 +4,11 @@
 #include <time.h>
 #include <stdlib.h>
 
-#define Q_OF_ORGS 4 //N
+#define Q_OF_ORGS 3 //N
 
-#define CONST_CITIES 2
+#define CONST_CITIES 1
 #define CONST_ROOMS 2
-#define CONST_PLACES 4
+#define CONST_PLACES 2
 
 //mpi msg tags
 #define TAG_EVENT_CREATE 0 //city, room
@@ -21,18 +21,11 @@
 #define TAG_EVENT_END 5 
 
 #define TAG_PLACE_RESERVE 10 //city
-#define TAG_PLACE_RESPONSE 11 //place 
-#define TAG_PLACE_RELEASE 12 //city
 
 //user types
 #define USER_ORGANIZATOR 101
 #define USER_PARTICIPANT 102
 
-
-//place msgs
-#define TAG_PLACE_PRESENCE 11
-#define TAG_PLACE_INTERESTED 12
-#define TAG_PLACE_NO_INTERESTED 13
 
 
 
@@ -53,16 +46,15 @@ int main(int argc, char **argv) {
     int numberOfOrganisators = Q_OF_ORGS;
     int numberOfParticipants = world_size - Q_OF_ORGS;
     int rooms[CONST_CITIES][CONST_ROOMS];
-    int hotels[CONST_CITIES][CONST_PLACES];
+    int hotels[CONST_CITIES];
     int interestedOrganisators[numberOfOrganisators];
     int interestedParticipantsTAB[numberOfParticipants];
     for(int i = 0; i < CONST_CITIES; i++){
     	for (int j = 0; j < CONST_PLACES; j++){
     		rooms[i][j]=-1;
     	}
-    	for (int k = 0; k < CONST_ROOMS; k++){
-    		hotels[i][k]=-1;
-    	}
+    	hotels[i]=-1;
+    	
     }
 
     int it = 0;
@@ -90,7 +82,6 @@ int main(int argc, char **argv) {
         	for(int i = 0; i < Q_OF_ORGS; i++){
         		if(i != world_rank){
         			MPI_Send(&cityAndRoom, 1,MPI_INT, i, TAG_EVENT_CREATE, MPI_COMM_WORLD);
-        			printf("S: ID: %d RCVR: %d MSG: %d IT:%d\n", world_rank, i, cityAndRoom, it);
         		}
 
         	}
@@ -100,7 +91,6 @@ int main(int argc, char **argv) {
 	            	MPI_Status status;
 	        		int cityAndRoomRCV;
 	            	MPI_Recv(&cityAndRoomRCV, 1, MPI_INT, MPI_ANY_SOURCE, TAG_EVENT_CREATE, MPI_COMM_WORLD, &status);
-					printf("R: ID: %d SNDR: %d MSG: %d IT:%d\n", world_rank, status.MPI_SOURCE, cityAndRoomRCV, it);
 					if(cityAndRoom == cityAndRoomRCV){
 						interestedOrganisators[status.MPI_SOURCE] = 1;
 						if(world_rank > status.MPI_SOURCE){
@@ -122,7 +112,6 @@ int main(int argc, char **argv) {
 
         	for(int i = numberOfOrganisators; i < world_size; i++){
         		MPI_Send(&cityAndRoom, 1,MPI_INT, i, TAG_EVENT_INVITATION, MPI_COMM_WORLD);
-        		//printf("SI ID %d V %d IT %d\n",world_rank,cityAndRoom,it);
         	}
         	int interestedParticipants = 0;
         	//receive answers
@@ -130,7 +119,6 @@ int main(int argc, char **argv) {
         		int response;
         		MPI_Recv(&response, 1, MPI_INT, MPI_ANY_SOURCE, TAG_EVENT_RESPONSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         		if (response == cityAndRoom){
-        			//printf("SIR ID %d R %d IT %d\n",world_rank,response,it);
         			interestedParticipantsTAB[i - numberOfOrganisators] = 1;
         		}
         	}
@@ -157,14 +145,11 @@ int main(int argc, char **argv) {
 	        			a = cityAndRoom;
 	        		}
 	        		MPI_Send(&a, 1,MPI_INT, i + numberOfOrganisators, TAG_EVENT_END, MPI_COMM_WORLD);
-	        		//printf("SENT ID %d RCV %d IT %d\n",world_rank,i,it);
 	        	}
         	}else{
         		int answer;
         		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_EVENT_END, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         	}
-        	//printf("ID: %d IT: %d ANOTHER ROUND\n",world_rank, it);
-
 
 
 
@@ -213,20 +198,69 @@ int main(int argc, char **argv) {
 			//make it here
 			//
 
+			//send to every participant city id
+			//if my id < places in hotel -> take place
+			//receive from every participants his city id
+			//if number of id's interested < places in hotel -> take place
+			//else resign from event and wait for another inviting
+
+
+			int city = cityAndRoom/CONST_PLACES;
+			int otherInterested = 0;
+			bool trigger = false;
+			for(int i = numberOfOrganisators; i < world_size; i++){
+				MPI_Send(&city, 1,MPI_INT, i, TAG_PLACE_RESERVE, MPI_COMM_WORLD);
+				//printf("PS ID: %d P: %d IT: %d \n",world_rank,city,it);
+			}
+			if(world_rank - numberOfOrganisators < CONST_PLACES){
+				hotels[city]++;
+				trigger = true;
+			}
+
+			for(int i = numberOfOrganisators; i < world_size; i++){
+				if(!trigger){
+					int answer;
+	        		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_PLACE_RESERVE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	        		if(answer == city){
+	        			otherInterested++;
+	        		}
+				}else{
+					int answer;
+	        		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_PLACE_RESERVE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				}
+			}
+
+			printf("INT ID: %d Q: %d IT: %d \n",world_rank,otherInterested,it);
+
+			if((!trigger) && (otherInterested < CONST_PLACES)){
+				hotels[city]++;
+				trigger = true;
+			}
+
+			if(trigger){
+				printf("HOTEL ID: %d CITY: %d IT: %d \n",world_rank,city,it);
+			}else{
+				printf("NO-HOTEL ID: %d Q: %d CITY: %d IT: %d \n",world_rank,otherInterested,city,it);
+			}
+
+
 
 			
 			for(int i = 0; i < realOrganisatorsQ; i++){
 				int answer;
         		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_EVENT_END, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        		if(answer == interested){
+        		if((answer == interested)&&(trigger)){
         			int time = rand()%3;
         			printf("WAITING ID: %d TIME: %d IT: %d\n",world_rank, time, it);
         			sleep(time);
+        			hotels[city]--;
         		}
 			}
-        }
-    }
-
+		}
+        
+    
+	
+	}
     // Finalize the MPI environment.
     MPI_Finalize();
 }
