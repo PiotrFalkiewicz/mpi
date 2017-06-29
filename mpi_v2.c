@@ -227,9 +227,10 @@ int main(int argc, char **argv) {
 			//FIGHT FOR PLACE IN HOTEL
 			for(int i = numberOfOrganisators; i < world_size; i++){
 				if(!trigger){
+					MPI_Status status;
 					int answer;
-	        		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_PLACE_RESERVE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-	        		if(answer == city){
+	        		MPI_Recv(&answer, 1, MPI_INT, MPI_ANY_SOURCE, TAG_PLACE_RESERVE, MPI_COMM_WORLD, &status);
+	        		if((answer == city) && (status.MPI_SOURCE < world_rank)){
 	        			otherInterested++;
 	        		}
 				}else{
